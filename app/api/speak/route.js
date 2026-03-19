@@ -20,13 +20,15 @@ export async function POST(request) {
       throw new Error("No text provided");
     }
 
+    const model = process.env.DEEPGRAM_TTS_MODEL || "aura-2-thalia-en";
     const response = await fetch(
-      "https://api.deepgram.com/v1/speak?model=aura-2-izanami-ja",
+      `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}`,
       {
         method: "POST",
         headers: {
           "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`,
           "Content-Type": "application/json",
+          Accept: "audio/mpeg",
         },
         body: JSON.stringify({ text: text.trim() }),
       }
