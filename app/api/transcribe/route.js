@@ -4,15 +4,12 @@ export async function POST(request) {
   try {
     const formData = await request.formData();
     const audioFile = formData.get("audio");
-
-    if (!audioFile) {
-      throw new Error("No audio file received");
-    }
+    if (!audioFile) throw new Error("No audio received");
 
     const audioBuffer = await audioFile.arrayBuffer();
 
     const response = await fetch(
-      "https://api.deepgram.com/v1/listen?model=nova-3&language=multi&smart_format=true&keyterms=bicycle%3A5&keyterms=cinema%3A5&keyterms=teacher%3A5",
+      "https://api.deepgram.com/v1/listen?model=nova-3&language=multi&smart_format=true",
       {
         method: "POST",
         headers: {
@@ -24,23 +21,16 @@ export async function POST(request) {
     );
 
     const data = await response.json();
-    console.log("Deepgram response:", JSON.stringify(data, null, 2));
-
-    if (!response.ok) {
-      throw new Error(data.err_msg || "Deepgram error");
-    }
+    if (!response.ok) throw new Error(data.err_msg || "Deepgram STT error");
 
     const text = data.results?.channels?.[0]?.alternatives?.[0]?.transcript;
-
-    if (!text || !text.trim()) {
-      throw new Error("No transcription received");
-    }
+    if (!text?.trim()) throw new Error("No speech detected");
 
     console.log("Transcribed:", text);
     return Response.json({ text });
 
   } catch (error) {
-    console.error("Transcription error:", error.message);
+    console.error("STT error:", error.message);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
