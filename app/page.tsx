@@ -22,12 +22,27 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const speakText = (text) => {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "ja-JP";
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
+  const speakText = async (text) => {
+    try {
+      const res = await fetch("/api/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+  
+      if (!res.ok) throw new Error("TTS failed");
+  
+      const audioBlob = await res.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audio.play();
+    } catch (e) {
+      console.error("TTS error:", e);
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "ja-JP";
+      window.speechSynthesis.speak(utterance);
+    }
   };
 
   const toggleTranslation = async (index) => {
