@@ -12,7 +12,7 @@ export async function POST(request) {
     }
 
     const response = await fetch(
-      "https://api.deepgram.com/v1/speak?model=aura-2-hera-en",
+      "https://api.deepgram.com/v1/speak?model=aura-2-izanami-ja",
       {
         method: "POST",
         headers: {
