@@ -1,11 +1,18 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 
+type Message = {
+  role: "user" | "assistant";
+  content: string;
+  translation: string | null;
+  showTranslation: boolean | "loading";
+};
+
 export default function Home() {
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "こんにちは！日本語を練習しましょう！Press the mic and speak — mix Japanese and Cantonese freely, I'll help you fix it! 🎙️",
+      content: "こんにちは！日本語を練習しましょう！Tap the mic and speak freely — Japanese, Cantonese or mixed! 🎙️",
       translation: null,
       showTranslation: false,
     },
@@ -14,207 +21,161 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
-  const messagesEndRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const speakText = async (text) => {
-    console.log("speakText called with:", text);
-    if (!text || !text.trim()) {
-      console.warn("speakText: empty text, skipping");
-      return;
-    }
+  const speakText = async (text: string) => {
     try {
       const res = await fetch("/api/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim() }),
+        body: JSON.stringify({ text }),
       });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "TTS failed");
-      }
-
-      const audioBlob = await res.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
+      if (!res.ok) throw new Error("TTS failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
       audio.play();
     } catch (e) {
       console.error("TTS error:", e);
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "ja-JP";
-      window.speechSynthesis.speak(utterance);
     }
   };
 
-  const toggleTranslation = async (index) => {
-    const msg = messages[index];
-    if (msg.translation) {
-      setMessages((prev) =>
-        prev.map((m, i) =>
-          i === index ? { ...m, showTranslation: !m.showTranslation } : m
-        )
-      );
-      return;
-    }
-    setMessages((prev) =>
-      prev.map((m, i) =>
-        i === index ? { ...m, showTranslation: "loading" } : m
-      )
-    );
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [
-            {
-              role: "user",
-              content: `Translate this Japanese text to Cantonese (Traditional Chinese). Reply with ONLY the Cantonese translation, no explanation, no Japanese, nothing else: "${msg.content}"`,
-            },
-          ],
-        }),
-      });
-      const data = await res.json();
-      setMessages((prev) =>
-        prev.map((m, i) =>
-          i === index
-            ? { ...m, translation: data.reply, showTranslation: true }
-            : m
-        )
-      );
-    } catch (e) {
-      setMessages((prev) =>
-        prev.map((m, i) =>
-          i === index ? { ...m, showTranslation: false } : m
-        )
-      );
-    }
-  };
+  const sendMessage = async (text: string) => {
+    if (!text.trim()) return;
 
-  const sendMessage = async (text) => {
-    if (!text || !text.trim()) return;
-    const userMessage = {
+    const userMsg: Message = {
       role: "user",
       content: text,
       translation: null,
       showTranslation: false,
     };
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
+    const updated = [...messages, userMsg];
+    setMessages(updated);
     setInput("");
     setLoading(true);
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: updatedMessages.map((m) => ({
+          messages: updated.map(m => ({
             role: m.role,
             content: m.content,
           })),
         }),
       });
       const data = await res.json();
-      const replyText = data.reply;
-      console.log("AI reply:", replyText);
+      if (!data.reply) throw new Error("No reply");
 
-      setMessages([
-        ...updatedMessages,
-        {
-          role: "assistant",
-          content: replyText,
-          translation: null,
-          showTranslation: false,
-        },
-      ]);
-
-      if (replyText) {
-        await speakText(replyText);
-      }
+      const assistantMsg: Message = {
+        role: "assistant",
+        content: data.reply,
+        translation: null,
+        showTranslation: false,
+      };
+      setMessages([...updated, assistantMsg]);
+      speakText(data.reply);
     } catch (e) {
-      setMessages([
-        ...updatedMessages,
-        {
-          role: "assistant",
-          content: "Sorry, something went wrong. Please try again.",
-          translation: null,
-          showTranslation: false,
-        },
-      ]);
+      setMessages([...updated, {
+        role: "assistant",
+        content: "Sorry, something went wrong. Please try again.",
+        translation: null,
+        showTranslation: false,
+      }]);
     }
     setLoading(false);
+  };
+
+  const toggleTranslation = async (index: number) => {
+    const msg = messages[index];
+
+    if (msg.translation) {
+      setMessages(prev => prev.map((m, i) =>
+        i === index ? { ...m, showTranslation: !m.showTranslation } : m
+      ));
+      return;
+    }
+
+    setMessages(prev => prev.map((m, i) =>
+      i === index ? { ...m, showTranslation: "loading" } : m
+    ));
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          translate: true,
+          messages: [{ role: "user", content: msg.content }],
+        }),
+      });
+      const data = await res.json();
+      setMessages(prev => prev.map((m, i) =>
+        i === index
+          ? { ...m, translation: data.reply, showTranslation: true }
+          : m
+      ));
+    } catch (e) {
+      setMessages(prev => prev.map((m, i) =>
+        i === index ? { ...m, showTranslation: false } : m
+      ));
+    }
   };
 
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        setTranscribing(true);
+        try {
+          const form = new FormData();
+          form.append("audio", blob, "recording.webm");
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            body: form,
+          });
+          const data = await res.json();
+          if (data.text) await sendMessage(data.text);
+        } catch (e) {
+          console.error("Transcription error:", e);
         }
+        setTranscribing(false);
       };
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(track => track.stop());
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        await transcribeAudio(audioBlob);
-      };
-      mediaRecorder.start();
+
+      recorder.start();
       setRecording(true);
     } catch (e) {
-      alert("Microphone access denied. Please allow mic access and try again.");
+      alert("Microphone access denied. Please allow mic and try again.");
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && recording) {
-      mediaRecorderRef.current.stop();
-      setRecording(false);
-    }
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
   };
 
-  const transcribeAudio = async (audioBlob) => {
-    setTranscribing(true);
-    try {
-      const formData = new FormData();
-      formData.append("audio", audioBlob, "recording.webm");
-      const res = await fetch("/api/transcribe", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      console.log("Transcription result:", data);
-      if (data.text && data.text.trim()) {
-        await sendMessage(data.text.trim());
-      }
-    } catch (e) {
-      console.error("Transcription failed:", e);
-    }
-    setTranscribing(false);
-  };
-
-  const toggleMic = () => {
-    if (recording) {
-      stopRecording();
-    } else {
-      startRecording();
-    }
-  };
-
-  const statusText = () => {
-    if (recording) return "Recording... tap to stop";
-    if (transcribing) return "Transcribing...";
-    return null;
-  };
+  const statusLabel = recording
+    ? "Recording... tap to stop"
+    : transcribing
+    ? "Transcribing..."
+    : null;
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -225,7 +186,7 @@ export default function Home() {
           <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-medium text-sm">JP</div>
           <div>
             <div className="font-medium text-gray-900 text-sm">Japanese tutor</div>
-            <div className="text-xs text-gray-400">Speak or type — mix Japanese and Cantonese freely</div>
+            <div className="text-xs text-gray-400">Speak freely — Japanese, Cantonese or mixed</div>
           </div>
         </div>
 
@@ -259,27 +220,20 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Buttons inside bubble */}
-                  <div className={`flex items-center gap-2 mt-2 pt-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`flex items-center gap-2 mt-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                     <button
                       onClick={() => speakText(msg.content)}
-                      className={`transition-colors ${
-                        msg.role === "user"
-                          ? "text-blue-200 hover:text-white"
-                          : "text-gray-400 hover:text-gray-600"
-                      }`}
-                      title="Listen"
+                      className={`transition-colors ${msg.role === "user" ? "text-blue-200 hover:text-white" : "text-gray-400 hover:text-gray-600"}`}
                     >
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
                         <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
                       </svg>
                     </button>
-
                     {msg.role === "assistant" && (
                       <button
                         onClick={() => toggleTranslation(i)}
-                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors border ${
+                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors ${
                           msg.showTranslation === true
                             ? "border-gray-300 text-gray-400"
                             : "border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-500"
@@ -308,15 +262,15 @@ export default function Home() {
 
         {/* Input */}
         <div className="p-4 border-t border-gray-100">
-          {statusText() && (
+          {statusLabel && (
             <div className="mb-2 flex items-center gap-2 text-xs font-medium text-red-500">
-              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              {statusText()}
+              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
+              {statusLabel}
             </div>
           )}
           <div className="flex gap-2 items-center">
             <button
-              onClick={toggleMic}
+              onClick={recording ? stopRecording : startRecording}
               disabled={transcribing}
               className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 border transition-colors ${
                 recording
@@ -327,7 +281,7 @@ export default function Home() {
               }`}
             >
               {transcribing ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
                   <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                 </svg>
               ) : (
@@ -342,8 +296,8 @@ export default function Home() {
             <input
               type="text"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendMessage(input)}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && sendMessage(input)}
               placeholder="Or type in Japanese..."
               className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-full outline-none focus:border-blue-300 bg-gray-50 text-gray-900"
             />
