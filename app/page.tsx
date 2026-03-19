@@ -23,15 +23,23 @@ export default function Home() {
   }, [messages]);
 
   const speakText = async (text) => {
+    console.log("speakText called with:", text);
+    if (!text || !text.trim()) {
+      console.warn("speakText: empty text, skipping");
+      return;
+    }
     try {
       const res = await fetch("/api/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: text.trim() }),
       });
-  
-      if (!res.ok) throw new Error("TTS failed");
-  
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "TTS failed");
+      }
+
       const audioBlob = await res.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
@@ -91,7 +99,7 @@ export default function Home() {
   };
 
   const sendMessage = async (text) => {
-    if (!text.trim()) return;
+    if (!text || !text.trim()) return;
     const userMessage = {
       role: "user",
       content: text,
@@ -114,16 +122,22 @@ export default function Home() {
         }),
       });
       const data = await res.json();
+      const replyText = data.reply;
+      console.log("AI reply:", replyText);
+
       setMessages([
         ...updatedMessages,
         {
           role: "assistant",
-          content: data.reply,
+          content: replyText,
           translation: null,
           showTranslation: false,
         },
       ]);
-      speakText(data.reply);
+
+      if (replyText) {
+        await speakText(replyText);
+      }
     } catch (e) {
       setMessages([
         ...updatedMessages,
@@ -142,22 +156,18 @@ export default function Home() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
-
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
-
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
           audioChunksRef.current.push(e.data);
         }
       };
-
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(track => track.stop());
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         await transcribeAudio(audioBlob);
       };
-
       mediaRecorder.start();
       setRecording(true);
     } catch (e) {
@@ -177,19 +187,14 @@ export default function Home() {
     try {
       const formData = new FormData();
       formData.append("audio", audioBlob, "recording.webm");
-
       const res = await fetch("/api/transcribe", {
         method: "POST",
         body: formData,
       });
-
       const data = await res.json();
       console.log("Transcription result:", data);
-
       if (data.text && data.text.trim()) {
         await sendMessage(data.text.trim());
-      } else {
-        console.log("No transcription received");
       }
     } catch (e) {
       console.error("Transcription failed:", e);
