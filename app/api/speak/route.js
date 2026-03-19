@@ -1,9 +1,18 @@
+export const runtime = "nodejs";
 export const maxDuration = 30;
 
 export async function POST(request) {
   try {
-    const body = await request.json();
-    const text = body.text;
+    const contentType = request.headers.get("content-type") || "";
+    let text;
+
+    if (contentType.includes("application/json")) {
+      const body = await request.json().catch(() => ({}));
+      text = body?.text;
+    } else {
+      // Allow plain text requests too (handy for quick testing)
+      text = await request.text().catch(() => "");
+    }
 
     console.log("TTS received text:", text);
 
