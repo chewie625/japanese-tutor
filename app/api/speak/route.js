@@ -23,10 +23,12 @@ export async function POST(request) {
       }
     );
 
+    console.log("Deepgram status:", response.status);
+
     if (!response.ok) {
-      const err = await response.json();
-      console.error("Deepgram TTS error:", err);
-      throw new Error(err.err_msg || "Deepgram TTS error");
+      const errText = await response.text();
+      console.error("Deepgram raw error:", errText);
+      throw new Error(errText);
     }
 
     const audioBuffer = await response.arrayBuffer();
