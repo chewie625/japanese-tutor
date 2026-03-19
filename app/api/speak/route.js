@@ -1,36 +1,43 @@
-export const runtime = "nodejs";
 export const maxDuration = 30;
+
+function cleanTextForSpeech(text) {
+  return text
+    .replace(/\*[^*]+\*/g, "")        // remove *asterisk* words
+    .replace(/\([^\)]+\)/g, "")       // remove (romaji readings)
+    .replace(/\「[^」]+\」/g, match => match.replace(/\「|\」/g, ""))
+    .replace(/[*_~`]/g, "")           // remove markdown symbols
+    .replace(/[a-zA-Z]+/g, "")        // remove English/romaji letters
+    .replace(/\s+/g, " ")             // clean up extra spaces
+    .trim();
+}
 
 export async function POST(request) {
   try {
-    const contentType = request.headers.get("content-type") || "";
-    let text;
+    const body = await request.json();
+    const rawText = body.text;
 
-    if (contentType.includes("application/json")) {
-      const body = await request.json().catch(() => ({}));
-      text = body?.text;
-    } else {
-      // Allow plain text requests too (handy for quick testing)
-      text = await request.text().catch(() => "");
-    }
+    console.log("TTS received text:", rawText);
 
-    console.log("TTS received text:", text);
-
-    if (!text || !text.trim()) {
+    if (!rawText || !rawText.trim()) {
       throw new Error("No text provided");
     }
 
-    const model = process.env.DEEPGRAM_TTS_MODEL || "aura-2-thalia-en";
+    const cleanText = cleanTextForSpeech(rawText);
+    console.log("Cleaned text for speech:", cleanText);
+
+    if (!cleanText) {
+      throw new Error("No speakable text after cleaning");
+    }
+
     const response = await fetch(
-      `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}`,
+      "https://api.deepgram.com/v1/speak?model=aura-2-izanami-ja",
       {
         method: "POST",
         headers: {
           "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`,
           "Content-Type": "application/json",
-          Accept: "audio/mpeg",
         },
-        body: JSON.stringify({ text: text.trim() }),
+        body: JSON.stringify({ text: cleanText }),
       }
     );
 
