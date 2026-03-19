@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "autopush": "chokidar \"app/**/*\" \"package.json\" \"package-lock.json\" \"next.config.*\" \"tsconfig.json\" \"eslint.config.*\" -i \"**/*.log\" -c \"./scripts/autopush.sh\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
@@ -20,6 +21,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "chokidar-cli": "^3",
     "eslint": "^9",
     "eslint-config-next": "16.1.7",
     "tailwindcss": "^4",
