@@ -1,33 +1,29 @@
 export const maxDuration = 30;
 
-const SYSTEM_PROMPT = `You are a friendly Japanese language tutor. The student is a Cantonese speaker learning Japanese.
+const SYSTEM_PROMPT = `You are a friendly Japanese language tutor. The student speaks Cantonese and is learning Japanese. They may speak in Japanese, Cantonese, English, or a mix.
 
 Your job:
-1. Always respond in Japanese only — never in Cantonese or Chinese
-2. If they mix in ANY English words mid-sentence, catch it immediately
-3. When you spot an English word, respond like this:
-   - Point out the exact English word they used (wrap it in *asterisks*)
+1. Always respond in Japanese only
+2. If the user mixes in English or Cantonese words where Japanese should be used, catch it immediately
+3. When you spot a non-Japanese word, respond like this:
+   - Point out the exact word they used
    - Give the Japanese equivalent with reading in brackets
    - Show the corrected sentence in Japanese
-   - Then continue the conversation naturally in Japanese
+   - Continue the conversation naturally in Japanese
+4. If their Japanese is fully correct, respond naturally in Japanese
+5. Keep responses concise — 2-4 sentences max
+6. Be gentle and encouraging always`;
 
-Keep corrections gentle and encouraging. Always continue the conversation after correcting.
-If their Japanese is fully correct, just respond naturally in Japanese.
-Keep responses concise — 2-4 sentences max.
-IMPORTANT: Never write Cantonese or Chinese characters in your response. Japanese only.`;
-
-const TRANSLATION_PROMPT = `You are a translator. Translate Japanese to Cantonese (Traditional Chinese). 
-Reply with ONLY the Cantonese translation. No explanation, no Japanese, no English. Just the Cantonese translation.`;
+const TRANSLATION_PROMPT = `You are a translator. Translate the Japanese text to Cantonese (Traditional Chinese). Reply with ONLY the Cantonese translation. Nothing else.`;
 
 export async function POST(request) {
   try {
-    const { messages } = await request.json();
+    const { messages, translate } = await request.json();
 
-    const isTranslation = messages.length === 1 &&
-      messages[0].content.startsWith("Translate this Japanese text to Cantonese");
+    const systemPrompt = translate ? TRANSLATION_PROMPT : SYSTEM_PROMPT;
 
     const chatMessages = messages
-      .filter(m => m.content && m.content.trim() !== "")
+      .filter(m => m.content?.trim())
       .map(m => ({
         role: m.role === "assistant" ? "assistant" : "user",
         content: m.content,
@@ -42,27 +38,23 @@ export async function POST(request) {
       body: JSON.stringify({
         model: "openrouter/auto",
         messages: [
-          { role: "system", content: isTranslation ? TRANSLATION_PROMPT : SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           ...chatMessages,
         ],
       }),
     });
 
     const data = await response.json();
-    console.log("Full OpenRouter response:", JSON.stringify(data, null, 2));
-    console.log("Status:", response.status);
-
-    if (!response.ok) {
-      throw new Error(data.error?.message || "OpenRouter error");
-    }
+    if (!response.ok) throw new Error(data.error?.message || "OpenRouter error");
 
     const reply = data.choices?.[0]?.message?.content;
-    if (!reply) throw new Error("Empty reply");
+    if (!reply) throw new Error("Empty reply from OpenRouter");
 
+    console.log("AI reply:", reply);
     return Response.json({ reply });
 
   } catch (error) {
-    console.error("Error:", error.message);
+    console.error("Chat error:", error.message);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
