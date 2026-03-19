@@ -9,27 +9,35 @@ export async function POST(request) {
       throw new Error("No audio file received");
     }
 
-    const groqForm = new FormData();
-    groqForm.append("file", audioFile, "recording.webm");
-    groqForm.append("model", "whisper-large-v3-turbo");
-    groqForm.append("response_format", "json");
+    const audioBuffer = await audioFile.arrayBuffer();
 
-    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-      },
-      body: groqForm,
-    });
+    const response = await fetch(
+      "https://api.deepgram.com/v1/listen?model=nova-3&language=multi&smart_format=true&keyterms=bicycle%3A5&keyterms=cinema%3A5&keyterms=teacher%3A5",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`,
+          "Content-Type": "audio/webm",
+        },
+        body: audioBuffer,
+      }
+    );
 
     const data = await response.json();
-    console.log("Groq transcription:", data);
+    console.log("Deepgram response:", JSON.stringify(data, null, 2));
 
     if (!response.ok) {
-      throw new Error(data.error?.message || "Groq error");
+      throw new Error(data.err_msg || "Deepgram error");
     }
 
-    return Response.json({ text: data.text });
+    const text = data.results?.channels?.[0]?.alternatives?.[0]?.transcript;
+
+    if (!text || !text.trim()) {
+      throw new Error("No transcription received");
+    }
+
+    console.log("Transcribed:", text);
+    return Response.json({ text });
 
   } catch (error) {
     console.error("Transcription error:", error.message);
