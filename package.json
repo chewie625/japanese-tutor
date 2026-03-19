@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "autopush": "chokidar \"app/**/*\" \"package.json\" \"package-lock.json\" \"next.config.*\" \"tsconfig.json\" \"eslint.config.*\" -i \"**/*.log\" -c \"./scripts/autopush.sh\""
+    "autopush": "CHOKIDAR_USEPOLLING=1 chokidar \"app/**/*\" \"package.json\" \"package-lock.json\" \"next.config.*\" \"tsconfig.json\" \"eslint.config.*\" -i \"**/*.log\" --polling --polling-interval 700 -c \"./scripts/autopush.sh\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
