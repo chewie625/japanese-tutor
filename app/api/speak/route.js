@@ -1,33 +1,24 @@
 export const maxDuration = 30;
 
-function cleanTextForSpeech(text) {
+function cleanForSpeech(text) {
   return text
-    .replace(/\*[^*]+\*/g, "")        // remove *asterisk* words
-    .replace(/\([^\)]+\)/g, "")       // remove (romaji readings)
-    .replace(/\「[^」]+\」/g, match => match.replace(/\「|\」/g, ""))
-    .replace(/[*_~`]/g, "")           // remove markdown symbols
-    .replace(/[a-zA-Z]+/g, "")        // remove English/romaji letters
-    .replace(/\s+/g, " ")             // clean up extra spaces
+    .replace(/\*[^*]+\*/g, "")
+    .replace(/\([a-zA-Z\s]+\)/g, "")
+    .replace(/[*_~`]/g, "")
+    .replace(/[a-zA-Z]+/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 export async function POST(request) {
   try {
-    const body = await request.json();
-    const rawText = body.text;
+    const { text } = await request.json();
+    if (!text?.trim()) throw new Error("No text provided");
 
-    console.log("TTS received text:", rawText);
+    const cleaned = cleanForSpeech(text);
+    console.log("Speaking:", cleaned);
 
-    if (!rawText || !rawText.trim()) {
-      throw new Error("No text provided");
-    }
-
-    const cleanText = cleanTextForSpeech(rawText);
-    console.log("Cleaned text for speech:", cleanText);
-
-    if (!cleanText) {
-      throw new Error("No speakable text after cleaning");
-    }
+    if (!cleaned) throw new Error("Nothing to speak after cleaning");
 
     const response = await fetch(
       "https://api.deepgram.com/v1/speak?model=aura-2-izanami-ja",
@@ -37,16 +28,13 @@ export async function POST(request) {
           "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ text: cleanText }),
+        body: JSON.stringify({ text: cleaned }),
       }
     );
 
-    console.log("Deepgram status:", response.status);
-
     if (!response.ok) {
-      const errText = await response.text();
-      console.error("Deepgram raw error:", errText);
-      throw new Error(errText);
+      const err = await response.text();
+      throw new Error(err);
     }
 
     const audioBuffer = await response.arrayBuffer();
