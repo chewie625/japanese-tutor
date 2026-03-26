@@ -6,30 +6,32 @@ type Message = {
   content: string;
   translation: string | null;
   showTranslation: boolean | "loading";
+  audioUrl: string | null;
 };
 
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "こんにちは！日本語を練習しましょう！Tap the mic and speak freely — Japanese, Cantonese or mixed! 🎙️",
-      translation: null,
-      showTranslation: false,
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([{
+    role: "assistant",
+    content: "こんにちは！日本語を練習しましょう！Type in any language — Japanese, Cantonese, English or mixed! 😊",
+    translation: null,
+    showTranslation: false,
+    audioUrl: null,
+  }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const speakText = async (text: string) => {
+  // ─── TTS: play cached or fetch ────────────────────────
+  const speakText = async (text: string, index: number) => {
+    const msg = messages[index];
+    if (msg.audioUrl) {
+      new Audio(msg.audioUrl).play();
+      return;
+    }
     try {
       const res = await fetch("/api/speak", {
         method: "POST",
@@ -37,76 +39,85 @@ export default function Home() {
         body: JSON.stringify({ text }),
       });
       if (!res.ok) throw new Error("TTS failed");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.play();
+      const url = URL.createObjectURL(await res.blob());
+      setMessages(prev => prev.map((m, i) =>
+        i === index ? { ...m, audioUrl: url } : m
+      ));
+      new Audio(url).play();
     } catch (e) {
       console.error("TTS error:", e);
     }
   };
 
+  // ─── Pre-fetch audio in background ───────────────────
+  const prefetchAudio = (text: string, index: number) => {
+    fetch("/api/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }).then(res => res.blob()).then(blob => {
+      const url = URL.createObjectURL(blob);
+      setMessages(prev => prev.map((m, i) =>
+        i === index ? { ...m, audioUrl: url } : m
+      ));
+    }).catch(e => console.error("Pre-fetch TTS error:", e));
+  };
+
+  // ─── Chat: send message to AI ─────────────────────────
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
-
-    const userMsg: Message = {
-      role: "user",
-      content: text,
-      translation: null,
-      showTranslation: false,
-    };
-    const updated = [...messages, userMsg];
+    const updated: Message[] = [...messages, {
+      role: "user", content: text,
+      translation: null, showTranslation: false,
+      audioUrl: null,
+    }];
     setMessages(updated);
     setInput("");
     setLoading(true);
-
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: updated.map(m => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: updated.map(m => ({ role: m.role, content: m.content })),
         }),
       });
-      const data = await res.json();
-      if (!data.reply) throw new Error("No reply");
+      const { reply } = await res.json();
+      if (!reply) throw new Error("No reply");
 
-      const assistantMsg: Message = {
-        role: "assistant",
-        content: data.reply,
-        translation: null,
-        showTranslation: false,
-      };
-      setMessages([...updated, assistantMsg]);
-      speakText(data.reply);
-    } catch (e) {
+      const newIndex = updated.length;
+      setMessages([...updated, {
+        role: "assistant", content: reply,
+        translation: null, showTranslation: false,
+        audioUrl: null,
+      }]);
+
+      // pre-fetch audio in background so speaker button is instant
+      prefetchAudio(reply, newIndex);
+
+    } catch {
       setMessages([...updated, {
         role: "assistant",
         content: "Sorry, something went wrong. Please try again.",
-        translation: null,
-        showTranslation: false,
+        translation: null, showTranslation: false,
+        audioUrl: null,
       }]);
     }
     setLoading(false);
   };
 
+  // ─── Translation: 文A button ──────────────────────────
   const toggleTranslation = async (index: number) => {
     const msg = messages[index];
-
     if (msg.translation) {
       setMessages(prev => prev.map((m, i) =>
         i === index ? { ...m, showTranslation: !m.showTranslation } : m
       ));
       return;
     }
-
     setMessages(prev => prev.map((m, i) =>
       i === index ? { ...m, showTranslation: "loading" } : m
     ));
-
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -116,67 +127,18 @@ export default function Home() {
           messages: [{ role: "user", content: msg.content }],
         }),
       });
-      const data = await res.json();
+      const { reply } = await res.json();
       setMessages(prev => prev.map((m, i) =>
-        i === index
-          ? { ...m, translation: data.reply, showTranslation: true }
-          : m
+        i === index ? { ...m, translation: reply, showTranslation: true } : m
       ));
-    } catch (e) {
+    } catch {
       setMessages(prev => prev.map((m, i) =>
         i === index ? { ...m, showTranslation: false } : m
       ));
     }
   };
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        setTranscribing(true);
-        try {
-          const form = new FormData();
-          form.append("audio", blob, "recording.webm");
-          const res = await fetch("/api/transcribe", {
-            method: "POST",
-            body: form,
-          });
-          const data = await res.json();
-          if (data.text) await sendMessage(data.text);
-        } catch (e) {
-          console.error("Transcription error:", e);
-        }
-        setTranscribing(false);
-      };
-
-      recorder.start();
-      setRecording(true);
-    } catch (e) {
-      alert("Microphone access denied. Please allow mic and try again.");
-    }
-  };
-
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setRecording(false);
-  };
-
-  const statusLabel = recording
-    ? "Recording... tap to stop"
-    : transcribing
-    ? "Transcribing..."
-    : null;
-
+  // ─── Render ───────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col h-[600px]">
@@ -186,7 +148,7 @@ export default function Home() {
           <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-medium text-sm">JP</div>
           <div>
             <div className="font-medium text-gray-900 text-sm">Japanese tutor</div>
-            <div className="text-xs text-gray-400">Speak freely — Japanese, Cantonese or mixed</div>
+            <div className="text-xs text-gray-400">Type in any language — I'll understand!</div>
           </div>
         </div>
 
@@ -220,10 +182,12 @@ export default function Home() {
                     </div>
                   )}
 
+                  {/* Buttons */}
                   <div className={`flex items-center gap-2 mt-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                     <button
-                      onClick={() => speakText(msg.content)}
+                      onClick={() => speakText(msg.content, i)}
                       className={`transition-colors ${msg.role === "user" ? "text-blue-200 hover:text-white" : "text-gray-400 hover:text-gray-600"}`}
+                      title={msg.audioUrl ? "Play" : "Loading audio..."}
                     >
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
@@ -249,12 +213,10 @@ export default function Home() {
             </div>
           ))}
 
-          {(loading || transcribing) && (
+          {loading && (
             <div className="flex gap-2">
               <div className="w-7 h-7 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 text-xs font-medium flex-shrink-0">JP</div>
-              <div className="bg-gray-100 px-4 py-2.5 rounded-2xl rounded-tl-sm text-gray-400 text-sm">
-                {transcribing ? "Transcribing..." : "Thinking..."}
-              </div>
+              <div className="bg-gray-100 px-4 py-2.5 rounded-2xl rounded-tl-sm text-gray-400 text-sm">Thinking...</div>
             </div>
           )}
           <div ref={messagesEndRef} />
@@ -262,43 +224,13 @@ export default function Home() {
 
         {/* Input */}
         <div className="p-4 border-t border-gray-100">
-          {statusLabel && (
-            <div className="mb-2 flex items-center gap-2 text-xs font-medium text-red-500">
-              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
-              {statusLabel}
-            </div>
-          )}
           <div className="flex gap-2 items-center">
-            <button
-              onClick={recording ? stopRecording : startRecording}
-              disabled={transcribing}
-              className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 border transition-colors ${
-                recording
-                  ? "bg-red-50 border-red-200 text-red-500"
-                  : transcribing
-                  ? "bg-gray-50 border-gray-100 text-gray-300"
-                  : "bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100"
-              }`}
-            >
-              {transcribing ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
-                  <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="9" y="2" width="6" height="12" rx="3"/>
-                  <path d="M5 10a7 7 0 0 0 14 0"/>
-                  <line x1="12" y1="20" x2="12" y2="23"/>
-                  <line x1="9" y1="23" x2="15" y2="23"/>
-                </svg>
-              )}
-            </button>
             <input
               type="text"
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && sendMessage(input)}
-              placeholder="Or type in Japanese..."
+              placeholder="Type in any language..."
               className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-full outline-none focus:border-blue-300 bg-gray-50 text-gray-900"
             />
             <button
